@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mymmrac/telego"
@@ -65,6 +66,10 @@ type TelegramChannel struct {
 	commandRegDelayFn func(int) time.Duration
 	commandRegCancel  context.CancelFunc
 
+	richHTTP        *http.Client
+	richAPIServer   string
+	richUnsupported atomic.Bool
+
 	mediaGroupMu    sync.Mutex
 	mediaGroups     map[string]*telegramMediaGroup
 	mediaGroupDelay time.Duration
@@ -88,28 +93,33 @@ func NewTelegramChannel(
 ) (*TelegramChannel, error) {
 	channelName := bc.Name()
 	var opts []telego.BotOption
+	richHTTP := http.DefaultClient
+	richAPIServer := "https://api.telegram.org"
 
 	if telegramCfg.Proxy != "" {
 		proxyURL, parseErr := url.Parse(telegramCfg.Proxy)
 		if parseErr != nil {
 			return nil, fmt.Errorf("invalid proxy URL %q: %w", telegramCfg.Proxy, parseErr)
 		}
-		opts = append(opts, telego.WithHTTPClient(&http.Client{
+		richHTTP = &http.Client{
 			Transport: &http.Transport{
 				Proxy: http.ProxyURL(proxyURL),
 			},
-		}))
+		}
+		opts = append(opts, telego.WithHTTPClient(richHTTP))
 	} else if os.Getenv("HTTP_PROXY") != "" || os.Getenv("HTTPS_PROXY") != "" {
 		// Use environment proxy if configured
-		opts = append(opts, telego.WithHTTPClient(&http.Client{
+		richHTTP = &http.Client{
 			Transport: &http.Transport{
 				Proxy: http.ProxyFromEnvironment,
 			},
-		}))
+		}
+		opts = append(opts, telego.WithHTTPClient(richHTTP))
 	}
 
 	if baseURL := strings.TrimRight(strings.TrimSpace(telegramCfg.BaseURL), "/"); baseURL != "" {
 		opts = append(opts, telego.WithAPIServer(baseURL))
+		richAPIServer = baseURL
 	}
 	opts = append(opts, telego.WithLogger(logger.NewLogger("telego")))
 
@@ -134,6 +144,9 @@ func NewTelegramChannel(
 		bc:          bc,
 		chatIDs:     make(map[string]int64),
 		tgCfg:       telegramCfg,
+
+		richHTTP:      richHTTP,
+		richAPIServer: richAPIServer,
 
 		mediaGroups:     make(map[string]*telegramMediaGroup),
 		mediaGroupDelay: telegramMediaGroupDelay(telegramCfg),
@@ -250,6 +263,19 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]
 		if msgIDs, handled := c.finalizeToolFeedbackMessageForChat(ctx, trackedChatID, msg); handled {
 			return msgIDs, nil
 		}
+	}
+
+	if !isToolFeedback && c.wantsRich(msg.Content) {
+		msgID, richErr := c.sendRich(ctx, chatID, threadID, msg.ReplyToMessageID, msg.Content)
+		if richErr == nil {
+			if hasTrackedMsg {
+				c.dismissTrackedToolFeedbackMessage(ctx, trackedChatID, trackedMsgID)
+			}
+			return []string{msgID}, nil
+		}
+		logger.WarnCF("telegram", "sendRichMessage failed, falling back to HTML", map[string]any{
+			"error": richErr.Error(),
+		})
 	}
 
 	// The Manager already splits messages to ≤4000 chars (WithMaxMessageLength),

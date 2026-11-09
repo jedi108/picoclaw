@@ -548,6 +548,8 @@ type TelegramSettings struct {
 	Streaming         StreamingConfig `json:"streaming,omitzero"   yaml:"-"`
 	UseMarkdownV2     bool            `json:"use_markdown_v2"      yaml:"-"               env:"PICOCLAW_CHANNELS_TELEGRAM_USE_MARKDOWN_V2"`
 	MediaGroupDelayMS int             `json:"media_group_delay_ms" yaml:"-"               env:"PICOCLAW_CHANNELS_TELEGRAM_MEDIA_GROUP_DELAY_MS"`
+	// RichMessages sends replies containing pipe tables via Bot API 10.1 sendRichMessage.
+	RichMessages bool `json:"rich_messages" yaml:"-" env:"PICOCLAW_CHANNELS_TELEGRAM_RICH_MESSAGES"`
 }
 
 type FeishuSettings struct {
