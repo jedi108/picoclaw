@@ -7598,3 +7598,57 @@ func TestRunWorkerPanicReleasesSessionTurnState(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func TestRunAgentLoop_NonPicoPublishesInterimAssistantContent(t *testing.T) {
+	cfg := &config.Config{Agents: config.AgentsConfig{Defaults: config.AgentDefaults{
+		Workspace: t.TempDir(), ModelName: "test-model", MaxTokens: 4096, MaxToolIterations: 10,
+	}}}
+	msgBus := bus.NewMessageBus()
+	al := NewAgentLoop(cfg, msgBus, &picoInterleavedContentProvider{})
+	agent := al.GetRegistry().GetDefaultAgent()
+	agent.Tools.Register(&toolLimitTestTool{})
+
+	opts := processOptions{
+		SessionKey: "agent:main:telegram:direct:1", Channel: "telegram", ChatID: "1",
+		UserMessage: "run with tools", DefaultResponse: defaultResponse,
+		AllowInterimPicoPublish: true,
+	}
+	if _, err := al.runAgentLoop(context.Background(), agent, opts); err != nil {
+		t.Fatalf("runAgentLoop() error = %v", err)
+	}
+	select {
+	case out := <-msgBus.OutboundChan():
+		if out.Content != "intermediate model text" || out.Channel != "telegram" {
+			t.Fatalf("interim outbound = %+v, want intermediate model text to telegram", out)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("interim assistant content was not published")
+	}
+
+	// не уходит, если включён tool_feedback (текст и так в пояснении) или interim запрещён
+	for _, tc := range []struct {
+		name     string
+		feedback bool
+		allow    bool
+	}{{"tool_feedback", true, true}, {"not_allowed", false, false}} {
+		cfg.Agents.Defaults.ToolFeedback.Enabled = tc.feedback
+		opts.AllowInterimPicoPublish = tc.allow
+		opts.SessionKey += tc.name
+		al2 := NewAgentLoop(cfg, msgBus, &picoInterleavedContentProvider{})
+		a2 := al2.GetRegistry().GetDefaultAgent()
+		a2.Tools.Register(&toolLimitTestTool{})
+		if _, err := al2.runAgentLoop(context.Background(), a2, opts); err != nil {
+			t.Fatalf("%s: runAgentLoop() error = %v", tc.name, err)
+		}
+		for drained := false; !drained; {
+			select {
+			case out := <-msgBus.OutboundChan():
+				if out.Content == "intermediate model text" {
+					t.Fatalf("%s: interim content published, want suppressed", tc.name)
+				}
+			case <-time.After(200 * time.Millisecond):
+				drained = true
+			}
+		}
+	}
+}

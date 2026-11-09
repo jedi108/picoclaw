@@ -662,6 +662,12 @@ func (p *Pipeline) CallLLM(
 			exec.response.Content,
 			assistantMsg.ToolCalls,
 		)
+	} else if ts.opts.AllowInterimPicoPublish && !shouldPublishToolFeedback(al.cfg, ts) &&
+		strings.TrimSpace(exec.response.Content) != "" {
+		// fork: text the model writes next to tool calls is otherwise lost on non-pico channels (Telegram).
+		pubCtx, pubCancel := context.WithTimeout(turnCtx, 3*time.Second)
+		_ = al.bus.PublishOutbound(pubCtx, outboundMessageForTurn(ts, exec.response.Content))
+		pubCancel()
 	}
 
 	return ControlToolLoop, nil
