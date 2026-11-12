@@ -59,6 +59,12 @@ type ToolResult struct {
 	// user's request at the channel/output level, so the agent loop can stop
 	// without a follow-up assistant response.
 	ResponseHandled bool `json:"response_handled,omitempty"`
+
+	// ForUserDirect sends ForUser to the user's channel even when the turn does not
+	// send responses itself (Telegram, steering), and keeps the LLM loop going.
+	// Set by MCP tools for TextContent with annotations.audience == ["user"]:
+	// such text goes to the user only and never into the LLM context.
+	ForUserDirect bool `json:"for_user_direct,omitempty"`
 }
 
 // ContentForLLM returns the normalized textual content to append to the

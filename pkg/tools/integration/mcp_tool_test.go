@@ -898,3 +898,28 @@ func TestMCPTool_Execute_WhitespaceWorkspaceDisablesArtifactPersistence(t *testi
 		t.Fatalf("expected large text to remain inline when workspace is blank, got %q", result.ForLLM)
 	}
 }
+
+// TextContent with audience ["user"] goes to the user only: ForUser + ForUserDirect, not into ForLLM.
+func TestMCPTool_Execute_AudienceUserOnly(t *testing.T) {
+	manager := &MockMCPManager{
+		callToolFunc: func(context.Context, string, string, map[string]any) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{Content: []mcp.Content{
+				&mcp.TextContent{Text: `{"summary":"ok"}`, Annotations: &mcp.Annotations{Audience: []mcp.Role{"assistant"}}},
+				&mcp.TextContent{Text: "| A |\n|---|\n| 1 |", Annotations: &mcp.Annotations{Audience: []mcp.Role{"user"}}},
+				&mcp.TextContent{Text: "| B |\n|---|\n| 2 |", Annotations: &mcp.Annotations{Audience: []mcp.Role{"user"}}},
+				&mcp.TextContent{Text: "both", Annotations: &mcp.Annotations{Audience: []mcp.Role{"user", "assistant"}}},
+			}}, nil
+		},
+	}
+	result := NewMCPTool(manager, "guard", &mcp.Tool{Name: "analytics_run"}).Execute(context.Background(), map[string]any{})
+	if result.ForLLM != "{\"summary\":\"ok\"}\nboth" {
+		t.Errorf("ForLLM = %q", result.ForLLM)
+	}
+	if !result.ForUserDirect || result.ForUser != "| A |\n|---|\n| 1 |\n<|[SPLIT]|>\n| B |\n|---|\n| 2 |" {
+		t.Errorf("ForUser = %q, direct %v", result.ForUser, result.ForUserDirect)
+	}
+	plain := NewMCPTool(&MockMCPManager{}, "guard", &mcp.Tool{Name: "x"}).Execute(context.Background(), map[string]any{})
+	if plain.ForUser != "" || plain.ForUserDirect {
+		t.Errorf("no audience: ForUser = %q, direct %v", plain.ForUser, plain.ForUserDirect)
+	}
+}

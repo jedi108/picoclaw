@@ -51,6 +51,11 @@ func agentCmd(message, sessionKey, model string, debug bool) error {
 
 	msgBus := bus.NewMessageBus()
 	defer msgBus.Close()
+	go func() { // CLI has no channel: print what tools send to the user directly (ForUserDirect), or it is lost
+		for m := range msgBus.OutboundChan() {
+			fmt.Println(strings.ReplaceAll(m.Content, "<|[SPLIT]|>", ""))
+		}
+	}()
 	agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
 	defer agentLoop.Close()
 
