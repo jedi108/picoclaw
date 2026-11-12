@@ -360,12 +360,19 @@ func extractContentText(content []mcp.Content) string {
 
 func (t *MCPTool) normalizeResultContent(ctx context.Context, content []mcp.Content) *ToolResult {
 	llmParts := make([]string, 0, len(content))
+	userParts := make([]string, 0, len(content))
 	rawTextParts := make([]string, 0, len(content))
 	mediaRefs := make([]string, 0, len(content))
 
 	for _, c := range content {
 		switch v := c.(type) {
 		case *mcp.TextContent:
+			if audienceUserOnly(v.Annotations) { // only for the user: straight to the channel, not into LLM context
+				if text := strings.TrimSpace(v.Text); text != "" {
+					userParts = append(userParts, text)
+				}
+				continue
+			}
 			rawText := strings.TrimSpace(v.Text)
 			if rawText != "" {
 				rawTextParts = append(rawTextParts, rawText)
@@ -422,16 +429,23 @@ func (t *MCPTool) normalizeResultContent(ctx context.Context, content []mcp.Cont
 
 	forLLM := strings.Join(compactStrings(llmParts), "\n")
 	rawText := strings.Join(compactStrings(rawTextParts), "\n")
-	if artifactResult := t.persistLargeTextArtifact(rawText); artifactResult != nil {
-		artifactResult.Media = mediaRefs
-		return artifactResult
+	result := t.persistLargeTextArtifact(rawText)
+	if result != nil {
+		result.Media = mediaRefs
+	} else {
+		result = &ToolResult{ForLLM: forLLM, Media: mediaRefs}
 	}
-
-	result := &ToolResult{
-		ForLLM: forLLM,
-		Media:  mediaRefs,
+	if len(userParts) > 0 {
+		// one message per part: channels split long text by length and a markdown table cut in half loses its header
+		result.ForUser = strings.Join(userParts, "\n<|[SPLIT]|>\n")
+		result.ForUserDirect = true
 	}
 	return result
+}
+
+// audienceUserOnly: annotations.audience is exactly ["user"].
+func audienceUserOnly(a *mcp.Annotations) bool {
+	return a != nil && len(a.Audience) == 1 && strings.EqualFold(string(a.Audience[0]), "user")
 }
 
 func (t *MCPTool) persistLargeTextArtifact(text string) *ToolResult {

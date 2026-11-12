@@ -221,7 +221,7 @@ toolLoop:
 					toolDuration := time.Duration(0)
 
 					shouldSendForUser := !hookResult.Silent && hookResult.ForUser != "" &&
-						(ts.opts.SendResponse || hookResult.ResponseHandled)
+						(ts.opts.SendResponse || hookResult.ResponseHandled || (hookResult.ForUserDirect && ts.depth == 0))
 					if shouldSendForUser {
 						al.bus.PublishOutbound(ctx, bus.OutboundMessage{
 							Context: bus.InboundContext{
@@ -675,7 +675,7 @@ toolLoop:
 
 		shouldSendForUser := !toolResult.Silent &&
 			toolResult.ForUser != "" &&
-			(ts.opts.SendResponse || toolResult.ResponseHandled)
+			(ts.opts.SendResponse || toolResult.ResponseHandled || (toolResult.ForUserDirect && ts.depth == 0))
 		if shouldSendForUser {
 			al.bus.PublishOutbound(ctx, outboundMessageForTurn(ts, toolResult.ForUser))
 			logger.DebugCF("agent", "Sent tool result to user",
