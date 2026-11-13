@@ -3383,3 +3383,42 @@ func TestManager_SendPlaceholder(t *testing.T) {
 		t.Error("expected SendPlaceholder to fail for unknown channel")
 	}
 }
+
+// mockChannelWithContentLength implements ContentLengthProvider (gobond#300).
+type mockChannelWithContentLength struct {
+	mockChannelWithLength
+}
+
+func (m *mockChannelWithContentLength) MaxMessageLengthFor(content string) int {
+	if strings.HasPrefix(content, "TABLE") {
+		return 100
+	}
+	return m.maxLen
+}
+
+func TestRunWorker_ContentLengthProvider(t *testing.T) {
+	m := newTestManager()
+	var mu sync.Mutex
+	var received []string
+	ch := &mockChannelWithContentLength{mockChannelWithLength{
+		mockChannel: mockChannel{sendFn: func(_ context.Context, msg bus.OutboundMessage) error {
+			mu.Lock()
+			received = append(received, msg.Content)
+			mu.Unlock()
+			return nil
+		}},
+		maxLen: 5,
+	}}
+	w := &channelWorker{ch: ch, queue: make(chan bus.OutboundMessage, 10), done: make(chan struct{}), limiter: rate.NewLimiter(rate.Inf, 1)}
+	go m.runWorker(t.Context(), "test", w)
+
+	w.queue <- testOutboundMessage(bus.OutboundMessage{Channel: "test", ChatID: "1", Content: "TABLE whole message"})
+	w.queue <- testOutboundMessage(bus.OutboundMessage{Channel: "test", ChatID: "1", Content: "hello world"})
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(received) < 3 || received[0] != "TABLE whole message" {
+		t.Fatalf("table must stay whole, plain text split by 5: %q", received)
+	}
+}

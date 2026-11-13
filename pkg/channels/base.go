@@ -82,6 +82,23 @@ type MessageLengthProvider interface {
 	MaxMessageLength() int
 }
 
+// ContentLengthProvider is an opt-in refinement of MessageLengthProvider: the limit
+// depends on the content (e.g. Telegram rich messages carry tables up to 32768 chars).
+type ContentLengthProvider interface {
+	MaxMessageLengthFor(content string) int
+}
+
+// maxLenFor returns the split limit for content on ch; 0 means "do not split".
+func maxLenFor(ch Channel, content string) int {
+	if clp, ok := ch.(ContentLengthProvider); ok {
+		return clp.MaxMessageLengthFor(content)
+	}
+	if mlp, ok := ch.(MessageLengthProvider); ok {
+		return mlp.MaxMessageLength()
+	}
+	return 0
+}
+
 type BaseChannel struct {
 	config              any
 	bus                 *bus.MessageBus

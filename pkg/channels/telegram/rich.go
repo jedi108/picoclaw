@@ -94,3 +94,12 @@ func (c *TelegramChannel) wantsRich(content string) bool {
 	return c.tgCfg.RichMessages && !c.richUnsupported.Load() &&
 		len([]rune(content)) <= richMessageMaxChars && hasPipeTable(content)
 }
+
+// MaxMessageLengthFor lets the channel manager keep a rich table in one message:
+// splitting it at 4000 would leave the tail without its header row (raw "|" lines).
+func (c *TelegramChannel) MaxMessageLengthFor(content string) int {
+	if c.wantsRich(content) {
+		return richMessageMaxChars
+	}
+	return c.MaxMessageLength()
+}

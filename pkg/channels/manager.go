@@ -1437,11 +1437,6 @@ func (m *Manager) runWorker(ctx context.Context, name string, w *channelWorker) 
 			if !ok {
 				return
 			}
-			maxLen := 0
-			if mlp, ok := w.ch.(MessageLengthProvider); ok {
-				maxLen = mlp.MaxMessageLength()
-			}
-
 			// Collect all message chunks to send
 			var chunks []string
 
@@ -1456,14 +1451,14 @@ func (m *Manager) runWorker(ctx context.Context, name string, w *channelWorker) 
 					for _, chunk := range markerChunks {
 						chunkMsg := msg
 						chunkMsg.Content = chunk
-						chunks = append(chunks, splitOutboundMessageContent(chunkMsg, maxLen)...)
+						chunks = append(chunks, splitOutboundMessageContent(chunkMsg, maxLenFor(w.ch, chunk))...)
 					}
 				}
 			}
 
 			// Step 2: Fallback to length-based splitting if no chunks from marker
 			if len(chunks) == 0 {
-				chunks = splitOutboundMessageContent(msg, maxLen)
+				chunks = splitOutboundMessageContent(msg, maxLenFor(w.ch, msg.Content))
 			}
 
 			// Step 3: Send all chunks
@@ -2025,11 +2020,7 @@ func (m *Manager) SendMessage(ctx context.Context, msg bus.OutboundMessage) erro
 		return fmt.Errorf("channel %s has no active worker", channelName)
 	}
 
-	maxLen := 0
-	if mlp, ok := w.ch.(MessageLengthProvider); ok {
-		maxLen = mlp.MaxMessageLength()
-	}
-	if chunks := splitOutboundMessageContent(msg, maxLen); len(chunks) > 1 {
+	if chunks := splitOutboundMessageContent(msg, maxLenFor(w.ch, msg.Content)); len(chunks) > 1 {
 		for _, chunk := range chunks {
 			chunkMsg := msg
 			chunkMsg.Content = chunk
